@@ -1,0 +1,22 @@
+# Virtual environments
+venv/
+.venv/
+env/
+
+# Environment variables & secrets (CRITICAL: NEVER COMMIT)
+.env
+*.env
+
+# Python caches & build artifacts
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+
+# UV and Pip artifacts
+get-pip.py
+.uv/
+
+# OS artifacts
+.DS_Store
+Thumbs.db
