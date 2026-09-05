@@ -132,10 +132,37 @@ python main.py
 
 ---
 
+## Architecture & Core Features (Phase 1 Complete)
+
+### 1. Hierarchical Multi-Agent Graph
+- **Supervisor (`supervisor_planner`)**: Decomposes complex user requests into structured, dependency-aware subtasks.
+- **Dispatcher (`dispatcher_node`)**: Inspects task prerequisite IDs against completed subtasks and dynamically routes tasks.
+- **Specialists**:
+  - **Researcher (`researcher_node`)**: Queries DuckDuckGo and synthesizes external knowledge (powered by Claude Haiku).
+  - **Coder (`coder_node`)**: Generates and runs Python simulation/benchmark code (powered by Claude Sonnet).
+  - **Writer (`writer_node`)**: Synthesizes previous deliverables into a structured executive report.
+- **Reviewer (`reviewer_node`)**: Acts as a strict quality gate, grading outputs and returning structured JSON verdicts (`approved`, `rejected`, `escalate`).
+
+### 2. Autonomous Self-Correction & Circuit Breaker
+- **Feedback-Injected Retries**: Rejection feedback from the reviewer is dynamically prepended to the specialist prompt on subsequent attempts.
+- **Per-Subtask Retry Quota**: The dispatcher resets retry error counts per subtask. If a single task fails review more than twice, execution terminates via the `human_escalation` node to prevent infinite loops and token waste.
+
+### 3. Tool Sandboxing & Execution Security
+- **Role-Based Tool Registry**: Enforces per-node permissions (e.g., only `coder` may execute Python; only `researcher` may access search).
+- **Timeout-Safeguarded Sandbox**: Executes generated code with an allowlist of safe built-ins and standard modules (`math`, `time`, `random`, `json`, `tracemalloc`). Uses native Unix `signal.alarm` timeouts to eliminate macOS multiprocessing serialization issues while guarding against CPU-locking loops.
+
+---
+
 ## Roadmap
 
-* [x] Phase 1: Supervisor planning, Tool Registry, Specialist Nodes, Reviewer Gate
-* [ ] Phase 2: LangGraph State Machine compilation with cyclic retry routing
-* [ ] Phase 3: Short-term (Redis) and Long-term Semantic Memory (SQLite / ChromaDB)
-* [ ] Phase 4: Human-in-the-Loop (HITL) approval queues and escalation triggers
-* [ ] Phase 5: Observability, OpenTelemetry traces, and Langfuse integration
+- [x] **Phase 1: Core Orchestration Graph & Specialists**
+  - [x] StateGraph state machine with dynamic routing and reducer state
+  - [x] Role-based tool registry with sandboxed execution
+  - [x] Corrective retry loop with human escalation gate
+  - [x] Multi-model routing (Claude Haiku + Claude Sonnet on AWS Bedrock)
+- [ ] **Phase 2: Checkpointing & State Persistence**
+  - [ ] LangGraph Checkpointer integration (`SqliteSaver` / `MemorySaver`)
+  - [ ] Session resumption via `thread_id` and time-travel debugging
+  - [ ] Human-in-the-loop pause and resume on review escalation
+- [ ] **Phase 3: Long-Term Memory & Storage**
+- [ ] **Phase 4: Tool Expansion & Production Hardening**
