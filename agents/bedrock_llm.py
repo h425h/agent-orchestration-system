@@ -7,59 +7,35 @@ from dotenv import load_dotenv
 load_dotenv()
 
 class BedrockLLM:
-    """Wrapper around AWS Bedrock Runtime Converse API for Claude models."""
-
-    def __init__(self, model_id: str = "us.anthropic.claude-haiku-4-5-20251001-v1:0"):
+    def __init__(self, model_id: str):
         self.region = os.getenv("AWS_REGION", "us-west-2")
-        self.bearer_token = os.getenv("AWS_BEARER_TOKEN_BEDROCK", "").strip().strip('"').strip("'")
+        self.bearer_token = os.getenv("AWS_BEARER_TOKEN_BEDROCK")
         self.model_id = model_id
 
-        if self.bearer_token:
-            os.environ["AWS_BEDROCK_API_KEY"] = self.bearer_token
-
-        self.client = boto3.client(
+        session = boto3.Session()
+        self.client = session.client(
             service_name="bedrock-runtime",
             region_name=self.region,
-            config=Config(retries={"max_attempts": 3, "mode": "standard"})
+            config=Config(retries={"max_attempts": 5, "mode": "standard"})
         )
 
-        def add_bearer_auth(request, **kwargs):
-            if self.bearer_token:
-                auth_val = (
-                    self.bearer_token
-                    if self.bearer_token.lower().startswith("bearer ")
-                    else f"Bearer {self.bearer_token}"
-                )
-                request.headers["Authorization"] = auth_val
+        if self.bearer_token:
+            def add_bearer_token(request, **kwargs):
+                request.headers["Authorization"] = f"Bearer {self.bearer_token}"
+            self.client.meta.events.register("before-send.bedrock-runtime.*", add_bearer_token)
 
-        self.client.meta.events.register("request-created.bedrock-runtime.*", add_bearer_auth)
-
-    def invoke(
-        self,
-        messages: list[dict],
-        system_prompt: str = "",
-        temperature: float = 0.0,
-        max_tokens: int = 2048
-    ) -> str:
-        """
-        Sends formatted messages to the Converse API.
-        messages format: [{"role": "user"|"assistant", "content": "text string"}]
-        """
-        converse_messages = [
-            {
+    def invoke(self, messages: list, system_prompt: str = None, max_tokens: int = 2048) -> str:
+        formatted_messages = []
+        for msg in messages:
+            formatted_messages.append({
                 "role": msg["role"],
                 "content": [{"text": msg["content"]}]
-            }
-            for msg in messages
-        ]
+            })
 
         kwargs = {
             "modelId": self.model_id,
-            "messages": converse_messages,
-            "inferenceConfig": {
-                "maxTokens": max_tokens,
-                "temperature": temperature
-            }
+            "messages": formatted_messages,
+            "inferenceConfig": {"maxTokens": max_tokens, "temperature": 0.2}
         }
         if system_prompt:
             kwargs["system"] = [{"text": system_prompt}]
@@ -67,5 +43,9 @@ class BedrockLLM:
         response = self.client.converse(**kwargs)
         return response["output"]["message"]["content"][0]["text"]
 
-# Singleton instance ready for import across agent nodes
-llm = BedrockLLM()
+# Specialized Model Instances
+llm_haiku = BedrockLLM(model_id="us.anthropic.claude-haiku-4-5-20251001-v1:0")
+llm_sonnet = BedrockLLM(model_id="us.anthropic.claude-sonnet-4-6")
+
+# Default fallback
+llm = llm_haiku
