@@ -57,12 +57,12 @@ Evaluate the deliverable strictly."""
         review_data = json.loads(cleaned)
     except Exception:
         review_data = {
-            "verdict": "approved",
-            "score": 7.0,
-            "feedback": "Auto-passed due to reviewer formatting irregularity."
+            "verdict": "escalate",
+            "score": 0.0,
+            "feedback": "Reviewer output was unparseable; escalating for human operator check."
         }
 
     return {
-        "reviewer_verdict": review_data.get("verdict", "approved"),
+        "reviewer_verdict": review_data.get("verdict", "escalate"),
         "reviewer_feedback": review_data.get("feedback", "")
-    }
+    }   

@@ -84,12 +84,37 @@ def web_search(query: str, max_results: int = 4) -> str:
         return f"Search failed: {e}"
 
 def run_python_code(code: str) -> str:
-    """Executes Python code in a safe string-buffered stdout capture."""
+    """
+    Executes Python code in a string-buffered stdout capture with restricted builtins.
+    """
     stdout_buffer = io.StringIO()
     stderr_buffer = io.StringIO()
 
+    # Restricted builtins allowlist
+    safe_builtins = {
+        "print": print,
+        "range": range,
+        "len": len,
+        "sum": sum,
+        "min": min,
+        "max": max,
+        "abs": abs,
+        "round": round,
+        "enumerate": enumerate,
+        "zip": zip,
+        "int": int,
+        "float": float,
+        "str": str,
+        "bool": bool,
+        "list": list,
+        "dict": dict,
+        "set": set,
+        "tuple": tuple,
+        "__import__": __import__,
+    }
+
     safe_globals = {
-        "__builtins__": __builtins__,
+        "__builtins__": safe_builtins,
         "math": __import__("math"),
         "time": __import__("time"),
         "json": __import__("json"),
