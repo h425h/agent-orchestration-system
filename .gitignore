@@ -22,3 +22,4 @@ get-pip.py
 Thumbs.db
 *.db
 *.sqlite
+orchestrator_chroma/
