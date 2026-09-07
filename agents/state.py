@@ -22,6 +22,7 @@ class ExecutionPlan(BaseModel):
     """Structured plan produced by the Supervisor agent."""
     reasoning: str = Field(description="Decomposition logic and high-level strategy")
     estimated_complexity: str = Field(description="low, medium, or high")
+    confidence: float = Field(default=0.95, description="Supervisor confidence in plan validity (0.0 - 1.0)")
     subtasks: List[Subtask] = Field(description="Ordered list of subtasks")
 
 class AgentState(TypedDict):
@@ -33,6 +34,9 @@ class AgentState(TypedDict):
     current_specialist_output: Optional[str]
     reviewer_verdict: Optional[str]  # "approved", "rejected", or "escalate"
     reviewer_feedback: Optional[str]
+    reviewer_score: Optional[float]           # Phase 3: Reviewer numerical quality score
     final_output: Optional[str]
     error_count: int
     human_approved: bool
+    require_human_approval: bool             # Phase 3: Explicit human review override flag
+    pending_escalation: Optional[Dict[str, Any]]  # Phase 3: Serialized EscalationRequest payload
