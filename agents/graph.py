@@ -7,24 +7,55 @@ from agents.state import AgentState
 from agents.supervisor import supervisor_planner
 from agents.specialists import researcher_node, coder_node, writer_node
 from agents.reviewer import reviewer_node
+from agents.escalation import EscalationPolicy, ApprovalLevel
+from agents.approval_queue import approval_queue
 
 
 # ---------------------------------------------------------
-# 1. Management Nodes (Dispatcher & Escalation)
+# 1. Management & Gate Nodes
 # ---------------------------------------------------------
+
+def plan_gate_node(state: AgentState) -> dict:
+    """
+    #1. Evaluates supervisor plan against escalation policy before any subtask begins.
+    """
+    escalation = EscalationPolicy.check_plan_escalation(state)
+    if escalation:
+        if escalation.level == ApprovalLevel.NOTIFY:
+            # Informational only: record notification without pausing
+            return {"pending_escalation": escalation.model_dump()}
+
+        # Package full context and register review ticket
+        ticket = approval_queue.enqueue(
+            thread_id="active_thread",
+            level=escalation.level,
+            reason=escalation.reason,
+            description=escalation.description,
+            context={
+                "task": state.get("task"),
+                "plan": state.get("plan"),
+                "completed_subtasks": state.get("completed_subtasks", []),
+                "current_subtask_id": state.get("current_subtask_id"),
+            }
+        )
+        return {
+            "pending_escalation": escalation.model_dump(),
+            "human_approved": False,
+            "reviewer_feedback": f"Review Ticket Created: {ticket.ticket_id}"
+        }
+
+    return {"pending_escalation": None}
+
 
 def dispatcher_node(state: AgentState) -> dict:
     """
-    Evaluates completed subtasks against dependencies to choose the next subtask,
-    or signals completion if all subtasks are finished.
-    Resets the error count when selecting a fresh subtask.
+    #2. Evaluates completed subtasks and selects the next runnable subtask.
     """
     plan = state.get("plan", {})
     subtasks = plan.get("subtasks", [])
     completed = state.get("completed_subtasks", [])
     completed_ids = {t["id"] for t in completed}
 
-    # #1. Find the next subtask whose dependencies are all satisfied
     for task in subtasks:
         if task["id"] not in completed_ids:
             deps_met = all(dep in completed_ids for dep in task.get("dependencies", []))
@@ -36,16 +67,49 @@ def dispatcher_node(state: AgentState) -> dict:
                     "error_count": 0,
                 }
 
-    # #2. If all tasks are completed, clear active subtask ID to trigger termination
     return {"current_subtask_id": None}
+
+
+def human_review_gate_node(state: AgentState) -> dict:
+    """
+    #3. Evaluates deliverable quality and retries to check if execution pause is needed.
+    """
+    escalation = EscalationPolicy.check_execution_escalation(state)
+    if escalation:
+        if escalation.level == ApprovalLevel.NOTIFY:
+            return {"pending_escalation": escalation.model_dump()}
+
+        # Package snapshot: task, plan, completed subtasks, active step, proposed deliverable
+        ticket = approval_queue.enqueue(
+            thread_id="active_thread",
+            level=escalation.level,
+            reason=escalation.reason,
+            description=escalation.description,
+            context={
+                "task": state.get("task"),
+                "plan": state.get("plan"),
+                "completed_subtasks": state.get("completed_subtasks", []),
+                "subtask_id": state.get("current_subtask_id"),
+                "proposed_action": state.get("current_specialist_output"),
+                "reviewer_feedback": state.get("reviewer_feedback"),
+                "reviewer_score": state.get("reviewer_score"),
+            }
+        )
+        return {
+            "pending_escalation": escalation.model_dump(),
+            "human_approved": False,
+            "reviewer_feedback": f"Execution Escalated: {ticket.ticket_id}"
+        }
+
+    return {"pending_escalation": None}
 
 
 def human_escalation_node(state: AgentState) -> dict:
     """
-    Fallback circuit breaker when confidence is low or retry thresholds are reached.
+    #4. Terminal pause node when execution cannot proceed autonomously.
     """
-    reason = state.get("reviewer_feedback", "Maximum retry threshold reached or quality failed.")
-    escalation_msg = f"[HUMAN ESCALATION TRIGGERED]: {reason}"
+    feedback = state.get("reviewer_feedback", "Task paused for human approval.")
+    escalation_msg = f"[HUMAN ESCALATION HALT]: {feedback}"
     return {
         "final_output": escalation_msg,
         "human_approved": False,
@@ -53,24 +117,29 @@ def human_escalation_node(state: AgentState) -> dict:
 
 
 def update_error_counter(state: AgentState) -> dict:
-    """Helper node on rejection to increment the retry error count."""
+    """#5. Increments retry error count."""
     return {"error_count": state.get("error_count", 0) + 1}
 
 
 # ---------------------------------------------------------
-# 2. Routing Logic (Conditional Edges)
+# 2. Routing Logic
 # ---------------------------------------------------------
 
+def route_plan_gate(state: AgentState) -> str:
+    """Decides if plan requires human review before dispatching subtasks."""
+    escalation = state.get("pending_escalation")
+    if escalation and escalation.get("level") in [ApprovalLevel.APPROVE_PLAN, ApprovalLevel.APPROVE_ACTION]:
+        if not state.get("human_approved", False):
+            return "human_escalation"
+    return "dispatcher"
+
+
 def route_dispatcher(state: AgentState) -> str:
-    """
-    Inspects the current subtask selected by the dispatcher
-    and returns the name of the assigned specialist node, or ends execution.
-    """
+    """Directs flow to the assigned specialist or terminates."""
     current_id = state.get("current_subtask_id")
     if not current_id:
         return "end"
 
-    # #1. Match the current task ID to identify which specialist node should execute
     for task in state.get("plan", {}).get("subtasks", []):
         if task["id"] == current_id:
             return task["specialist"]
@@ -79,59 +148,68 @@ def route_dispatcher(state: AgentState) -> str:
 
 
 def route_after_review(state: AgentState) -> str:
-    """
-    Evaluates reviewer verdict and error counts to direct subsequent execution:
-    - 'approved': moves forward to dispatcher (regardless of prior retries)[cite: 1].
-    - 'rejected' & error_count < 2: retries the specialist with feedback[cite: 1].
-    - 'rejected' & error_count >= 2: breaks circuit and routes to human escalation[cite: 1].
-    - 'escalate': safety or formatting failure, routes directly to human escalation[cite: 1].
-    """
+    """Routes based on reviewer results and escalation criteria."""
     verdict = state.get("reviewer_verdict")
 
-    # #1. Approved deliverables always advance to the dispatcher for the next subtask[cite: 1]
+    # #1. If approved, advance
     if verdict == "approved":
         return "dispatcher"
 
-    # #2. On rejection, evaluate the error counter before allowing another attempt[cite: 1]
+    # #2. Check if execution conditions demand human review gate
+    escalation = EscalationPolicy.check_execution_escalation(state)
+    if escalation:
+        return "human_review_gate"
+
+    # #3. Standard retry
     if verdict == "rejected":
-        errors = state.get("error_count", 0)
-        if errors >= 2:
-            return "human_escalation"
         return "retry_specialist"
 
-    # #3. Route to human escalation on unparseable verdicts or explicit escalation[cite: 1]
     return "human_escalation"
 
 
+def route_after_human_gate(state: AgentState) -> str:
+    """Routes after human review gate evaluates state."""
+    escalation = state.get("pending_escalation")
+    if escalation and escalation.get("level") in [ApprovalLevel.APPROVE_ACTION, ApprovalLevel.TAKE_OVER]:
+        if not state.get("human_approved", False):
+            return "human_escalation"
+    return "dispatcher"
+
+
 # ---------------------------------------------------------
-# 3. Assembling the State Machine Graph with Checkpointing
+# 3. Assembling the State Machine Graph
 # ---------------------------------------------------------
 
 def create_agent_graph(checkpointer: Optional[BaseCheckpointSaver] = None):
-    """Compiles the multi-agent state machine with an optional persistent checkpointer."""
-    # #1. Initialize the StateGraph with the shared schema definition[cite: 1]
     workflow = StateGraph(AgentState)
 
-    # #2. Register all management, worker, and validation nodes[cite: 1]
+    # Register Nodes
     workflow.add_node("supervisor", supervisor_planner)
+    workflow.add_node("plan_gate", plan_gate_node)
     workflow.add_node("dispatcher", dispatcher_node)
     workflow.add_node("researcher", researcher_node)
     workflow.add_node("coder", coder_node)
     workflow.add_node("writer", writer_node)
     workflow.add_node("reviewer", reviewer_node)
+    workflow.add_node("human_review_gate", human_review_gate_node)
     workflow.add_node("increment_error", update_error_counter)
     workflow.add_node("human_escalation", human_escalation_node)
 
-    # #3. Set the supervisor planner as the entry point and link directly to dispatcher[cite: 1]
+    # 1. Entry point -> Supervisor -> Plan Gate
     workflow.set_entry_point("supervisor")
-    workflow.add_edge("supervisor", "dispatcher")
+    workflow.add_edge("supervisor", "plan_gate")
 
-    # #4. Connect specialist nodes directly to the reviewer quality gate[cite: 1]
-    workflow.add_edge("researcher", "reviewer")
-    workflow.add_edge("coder", "reviewer")
-    workflow.add_edge("writer", "reviewer")
+    # 2. Plan Gate conditionally allows execution or pauses
+    workflow.add_conditional_edges(
+        "plan_gate",
+        route_plan_gate,
+        {
+            "dispatcher": "dispatcher",
+            "human_escalation": "human_escalation"
+        }
+    )
 
-    # #5. Dispatcher conditionally branches to the assigned specialist or terminates at END[cite: 1]
+    # 3. Dispatcher branches to specialists or END
     workflow.add_conditional_edges(
         "dispatcher",
         route_dispatcher,
@@ -140,21 +218,37 @@ def create_agent_graph(checkpointer: Optional[BaseCheckpointSaver] = None):
             "coder": "coder",
             "writer": "writer",
             "end": END,
-        },
+        }
     )
 
-    # #6. Reviewer conditionally routes based on deliverable evaluation[cite: 1]
+    # 4. Specialists -> Reviewer
+    workflow.add_edge("researcher", "reviewer")
+    workflow.add_edge("coder", "reviewer")
+    workflow.add_edge("writer", "reviewer")
+
+    # 5. Reviewer evaluation
     workflow.add_conditional_edges(
         "reviewer",
         route_after_review,
         {
             "dispatcher": "dispatcher",
             "retry_specialist": "increment_error",
+            "human_review_gate": "human_review_gate",
             "human_escalation": "human_escalation",
-        },
+        }
     )
 
-    # #7. Retry path increments the error count and hands work back to the specialist[cite: 1]
+    # 6. Human Review Gate branches
+    workflow.add_conditional_edges(
+        "human_review_gate",
+        route_after_human_gate,
+        {
+            "dispatcher": "dispatcher",
+            "human_escalation": "human_escalation"
+        }
+    )
+
+    # 7. Retry path increments error count and re-dispatches
     workflow.add_conditional_edges(
         "increment_error",
         route_dispatcher,
@@ -163,11 +257,10 @@ def create_agent_graph(checkpointer: Optional[BaseCheckpointSaver] = None):
             "coder": "coder",
             "writer": "writer",
             "end": "human_escalation",
-        },
+        }
     )
 
-    # #8. Terminate workflow cleanly upon human escalation[cite: 1]
+    # 8. Clean finish on escalation halt
     workflow.add_edge("human_escalation", END)
 
-    # #9. Compile into an executable graph, injecting the persistent checkpointer if provided
     return workflow.compile(checkpointer=checkpointer)
