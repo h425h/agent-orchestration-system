@@ -1,6 +1,5 @@
 # agents/resumption.py
 from typing import Dict, Any, Optional
-from langgraph.graph.state import CompiledStateGraph
 
 from agents.state import AgentState
 from agents.approval_queue import approval_queue, ReviewDecision
@@ -8,8 +7,8 @@ from agents.escalation import ApprovalLevel
 
 
 def resume_with_human_decision(
-    app: CompiledStateGraph,
-    config: Dict[str, Any],
+    app: Any,
+    config: Optional[Dict[str, Any]],
     ticket_id: str,
     decision: ReviewDecision,
     feedback: Optional[str] = None,
@@ -54,7 +53,6 @@ def resume_with_human_decision(
         state_update["reviewer_feedback"] = feedback or "Action approved by human."
 
     elif ticket.level == ApprovalLevel.TAKE_OVER:
-        # Human provides output directly; inject into completed subtasks
         subtask_id = ticket.context.get("subtask_id")
         takeover_deliverable = modified_output or feedback or "Deliverable provided by human operator."
         state_update["current_specialist_output"] = takeover_deliverable
