@@ -7,6 +7,17 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 
 import json
 import streamlit as st
+from ui.trace_explorer import render_trace_explorer
+
+# Multi-Page Navigation in Sidebar
+page = st.sidebar.radio(
+    "Navigation Mode",
+    ["Human-in-the-Loop Reviewer", "Trace Explorer & Debugger"]
+)
+
+if page == "Trace Explorer & Debugger":
+    render_trace_explorer()
+    st.stop()
 
 from agents.approval_queue import approval_queue, ReviewDecision
 from agents.escalation import ApprovalLevel, EscalationReason
