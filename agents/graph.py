@@ -148,20 +148,23 @@ def route_dispatcher(state: AgentState) -> str:
 
 
 def route_after_review(state: AgentState) -> str:
-    """Routes based on reviewer results and escalation criteria."""
+    """
+    Directs flow based on reviewer verdict:
+    1. 'approved' ALWAYS moves forward to dispatcher.
+    2. 'rejected' checks error_count:
+       - if error_count >= 2 -> human_escalation
+       - if error_count < 2 -> retry_specialist
+    3. Any other verdict ('escalate', unparseable) -> human_escalation
+    """
     verdict = state.get("reviewer_verdict")
 
-    # #1. If approved, advance
     if verdict == "approved":
         return "dispatcher"
 
-    # #2. Check if execution conditions demand human review gate
-    escalation = EscalationPolicy.check_execution_escalation(state)
-    if escalation:
-        return "human_review_gate"
-
-    # #3. Standard retry
     if verdict == "rejected":
+        errors = state.get("error_count", 0)
+        if errors >= 2:
+            return "human_escalation"
         return "retry_specialist"
 
     return "human_escalation"
