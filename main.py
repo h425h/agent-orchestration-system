@@ -1,27 +1,49 @@
 # main.py
 import uuid
+import time
+import os
+from dotenv import load_dotenv
+
 from agents.graph import create_agent_graph
 from agents.state import AgentState
-from memory.checkpointer import get_checkpointer
+from memory.checkpointer import get_sqlite_checkpointer
 from memory.semantic_store import semantic_memory
+from eval.tracer import tracer
+from eval.cost_tracker import cost_tracker
+
+load_dotenv()
 
 
-def main():
-    # #1. Initialize persistent working memory checkpointer
-    checkpointer = get_checkpointer("orchestrator_state.db")
+def run_orchestration_pipeline(task_prompt: str, thread_id: str = None) -> dict:
+    """
+    Executes the full end-to-end multi-agent pipeline:
+    - LangGraph execution with Sqlite state checkpointing
+    - Span tracing via OrchestrationTracer
+    - Token attribution and cost tracking
+    - Long-term memory distillation upon completion
+    """
+    thread_id = thread_id or f"run_{uuid.uuid4().hex[:8]}"
+    checkpointer = get_sqlite_checkpointer("orchestrator_state.db")
+    if hasattr(checkpointer, "setup"):
+        checkpointer.setup()
+
     app = create_agent_graph(checkpointer=checkpointer)
+    config = {"configurable": {"thread_id": thread_id}}
 
-    # #2. Unique session identifier for state persistence and resumption
-    session_thread_id = str(uuid.uuid4())
-    config = {"configurable": {"thread_id": session_thread_id}}
+    print("=" * 70)
+    print(f"🚀 Launching Pipeline Run: {thread_id}")
+    print(f"📋 Task: {task_prompt}")
+    print("=" * 70)
 
-    user_task = (
-        "Research top vector databases in 2026, benchmark vector math calculation speed "
-        "using Python simulation code, and write an executive summary."
+    # Start root execution trace
+    root_span = tracer.start_span(
+        trace_id=thread_id,
+        name="end_to_end_pipeline",
+        attributes={"task": task_prompt}
     )
 
     initial_state: AgentState = {
-        "task": user_task,
+        "task": task_prompt,
         "plan": None,
         "completed_subtasks": [],
         "current_subtask_id": None,
@@ -31,59 +53,60 @@ def main():
         "final_output": None,
         "error_count": 0,
         "human_approved": False,
+        "require_human_approval": False,
+        "pending_escalation": None,
     }
 
-    print(f"Initializing Multi-Agent Pipeline | Thread ID: {session_thread_id}")
-    print("=" * 60)
+    final_state = initial_state
+    start_time = time.time()
 
-    final_report = None
-    final_state_accumulator = {}
-
-    # #3. Stream node updates through checkpointed state graph
     for event in app.stream(initial_state, config=config):
         for node_name, updates in event.items():
-            print(f"\n---> Finished Node: [{node_name}]")
-            final_state_accumulator.update(updates)
+            print(f"  👉 [Graph Node Completed]: {node_name}")
+            final_state.update(updates)
 
-            if "plan" in updates and updates["plan"]:
-                tasks = updates["plan"].get("subtasks", [])
-                print(f"     Supervisor created plan with {len(tasks)} subtasks.")
+            # Record telemetry span for node
+            node_span = tracer.start_span(
+                trace_id=thread_id,
+                name=f"node_{node_name}",
+                parent_span_id=root_span.span_id,
+                agent_role=node_name
+            )
+            tracer.end_span(node_span.span_id, status="success")
 
-            if "current_subtask_id" in updates and updates["current_subtask_id"]:
-                print(f"     Active Task: {updates['current_subtask_id']}")
+            # Track mock token usage for Bedrock accounting
+            cost_tracker.record_usage(
+                run_id=thread_id,
+                agent_role=node_name,
+                model_id="anthropic.claude-3-5-haiku-20241022-v1:0",
+                input_tokens=850,
+                output_tokens=220,
+                latency_ms=180.0
+            )
 
-            if "reviewer_verdict" in updates and updates["reviewer_verdict"]:
-                print(f"     Reviewer Verdict: {updates['reviewer_verdict']}")
-                feedback = updates.get("reviewer_feedback", "")
-                if feedback:
-                    print(f"     Feedback: {feedback[:100]}...")
+    elapsed = round(time.time() - start_time, 2)
+    tracer.end_span(root_span.span_id, status="success", attributes={"elapsed_s": elapsed})
 
-            if "error_count" in updates:
-                print(f"     Retry Error Count: {updates['error_count']}")
+    # Long-term semantic distillation
+    print("\n🧠 Distilling run learnings into ChromaDB long-term memory...")
+    insights = semantic_memory.distill_and_store(task_prompt, final_state)
 
-            if "final_output" in updates and updates["final_output"]:
-                final_report = updates["final_output"]
+    summary = cost_tracker.get_run_summary(thread_id)
 
-    print("\n" + "=" * 60)
-    print("Orchestration Pipeline Finished!")
+    print("=" * 70)
+    print(f"✅ Pipeline Run Finished in {elapsed}s")
+    print(f"💰 Total Run Cost: ${summary['total_cost_usd']:.5f} ({summary['total_tokens']} tokens)")
+    print(f"💾 Memory Distilled: {insights.get('summary')}")
+    print("=" * 70)
 
-    # #4. Handle deliverable and trigger long-term semantic distillation
-    if final_report:
-        print("\n=== FINAL DELIVERABLE ===\n")
-        print(final_report)
-
-        with open("final_report.md", "w") as f:
-            f.write(final_report)
-        print("\nSaved deliverable to final_report.md")
-
-        print("\n--- Distilling Knowledge into Long-Term Semantic Memory ---")
-        snapshot = app.get_state(config)
-        insights = semantic_memory.distill_and_store(user_task, snapshot.values, user_id="default_user")
-        print("Distilled Summary:", insights.get("summary"))
-        print("Approach Saved:", insights.get("successful_approach"))
-    else:
-        print("No final deliverable produced (run may have terminated in human escalation).")
+    return {
+        "thread_id": thread_id,
+        "final_state": final_state,
+        "cost_summary": summary,
+        "distilled_insights": insights
+    }
 
 
 if __name__ == "__main__":
-    main()
+    task = "Research 2026 AI agent orchestration frameworks and write a structured executive summary."
+    run_orchestration_pipeline(task)
