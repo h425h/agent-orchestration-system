@@ -1,168 +1,115 @@
-# Multi-Agent Orchestration Platform
+# Autonomous Multi-Agent Orchestration Platform
 
-An enterprise-grade multi-agent orchestration framework built on **LangGraph** and **AWS Bedrock (Claude Haiku 4.5)**, featuring autonomous task decomposition, role-based tool execution, dynamic state accumulation, and automated quality gating.
+An enterprise-ready, observable multi-agent orchestration engine built with **LangGraph**, **AWS Bedrock (Claude 3.5 Sonnet & Haiku)**, **ChromaDB**, and **OpenTelemetry**. 
 
----
-
-## Key Architecture & Features
-
-* **Hierarchical Agent Flow**: A Supervisor Agent decomposes complex, ambiguous requests into an ordered, dependency-aware directed acyclic graph (DAG) of subtasks assigned to specialized domain agents.
-* **Specialist Layer**:
-* **Researcher**: Formulates targeted search queries, interfaces with live web search APIs (`ddgs`), and extracts structured domain insights.
-* **Coder**: Generates clean Python scripts, executes them in an isolated stdout/stderr capture runtime, and collects computational benchmarks.
-* **Writer**: Consolidates prior findings and data logs into executive-level synthesis deliverables.
-
-
-* **Hardened Tool Registry & RBAC**: Centralized tool execution catalog enforcing deterministic, code-level role-based access control (RBAC) to block cross-agent unauthorized tool execution, complete with runtime latency telemetry.
-* **Reviewer Quality Gate**: A dedicated validation node reviewing all specialist outputs against task criteria, capable of issuing `approved`, `rejected` (with corrective feedback for iterative loops), or `escalate` verdicts.
-* **Resilient AWS Bedrock Integration**: Custom client implementation targeting Bedrock's cross-region inference profiles (`us.anthropic.claude-haiku-4-5-20251001-v1:0`) using botocore request lifecycle hooks for Bearer token authorization.
-* **Immutable State Reducers**: LangGraph state updates utilize append-only list reducers (`operator.add`) to guarantee intermediate research and computation results accumulate without accidental overwrites.
+The system features dynamic task decomposition, specialized tool execution, fail-closed quality review, human-in-the-loop (HITL) escalation gates, persistent SQLite state checkpointing, semantic memory distillation, and an interactive trace explorer with checkpoint replay debugging.
 
 ---
 
-## Project Structure
+## System Architecture
 
-```text
-agent-orchestration-system/
-├── agents/
-│   ├── __init__.py
-│   ├── bedrock_llm.py      # AWS Bedrock Converse API singleton with auth hooks
-│   ├── state.py            # TypedDict AgentState & Pydantic execution schemas
-│   ├── supervisor.py       # Task decomposition & planning engine
-│   ├── specialists.py      # Researcher, Coder, and Writer worker nodes
-│   └── reviewer.py         # Output validation and routing gate
-├── tools/
-│   ├── __init__.py
-│   └── registry.py         # Tool catalog with access controls & execution telemetry
-├── memory/                 # Persistent memory modules (Short-term & Long-term)
-├── eval/                   # Langfuse tracing and prompt evaluation suites
-├── tests/                  # Unit and integration test suites
-├── test_bedrock.py         # Bedrock inference profile verification script
-├── test_tools.py           # Tool registry & RBAC boundary verification
-├── test_specialists.py     # Specialist-to-reviewer flow validation
-├── main.py                 # Core supervisor planner execution entry point
-├── .env.example            # Environment variable template
-└── .gitignore              # Strict secret isolation rules
-
-```
+┌─────────────────────────┐
+                            │    User Prompt / Goal   │
+                            └────────────┬────────────┘
+                                         │
+                                         ▼
+                            ┌─────────────────────────┐
+                            │   Supervisor Planner    │◄─── Long-Term Memory
+                            │  (Claude 3.5 Haiku)     │     (ChromaDB Retrieval)
+                            └────────────┬────────────┘
+                                         │
+                                         ▼
+                            ┌─────────────────────────┐
+                            │    Plan Review Gate     │───► Escalation Queue
+                            └────────────┬────────────┘     (Low Confidence)
+                                         │ (Approved)
+                                         ▼
+                            ┌─────────────────────────┐
+                 ┌─────────►│  Dependency Dispatcher  │◄────────┐
+                 │          └────────────┬────────────┘         │
+                 │                       │                      │
+   ┌─────────────┴──────────┐            │        ┌─────────────┴──────────┐
+   │     Researcher Node    │            │        │       Writer Node      │
+   │  • DuckDuckGo Search   │            │        │  • Synthesis & Report  │
+   └─────────────┬──────────┘            │        └─────────────┬──────────┘
+                 │                       ▼                      │
+                 │          ┌─────────────────────────┐         │
+                 │          │        Coder Node       │         │
+                 │          │   (Claude 3.5 Sonnet)   │         │
+                 │          │  • Sandboxed Execution  │         │
+                 │          └────────────┬────────────┘         │
+                 │                       │                      │
+                 └───────────────────────┼──────────────────────┘
+                                         │
+                                         ▼
+                            ┌─────────────────────────┐
+                            │      Reviewer Gate      │
+                            │   (Fail-Closed Check)   │
+                            └──────┬───────────┬──────┘
+                                   │           │
+                      (Approved)   │           │ (Rejected & Retries < 2)
+                                   │           └──────► Increment Error & Retry
+                                   ▼
+                     All Subtasks Complete?
+                             /        \
+                         (No)          (Yes)
+                          /              \
+                 Back to Dispatcher       ▼
+                                   ┌─────────────────────────┐
+                                   │  Distill Semantic Store │
+                                   │  (Embed into ChromaDB)  │
+                                   └─────────────────────────┘
 
 ---
 
-## Getting Started
+## Core Capabilities Across Phases
+
+### 1. Multi-Agent Coordination (Phase 1)
+* **Supervisor Planner**: Decomposes natural language objectives into structured subtasks with explicit dependencies and complexity estimates.
+* **Specialist Execution**:
+  * **Researcher**: Queries DuckDuckGo for live facts, metrics, and documentation.
+  * **Coder (Claude 3.5 Sonnet)**: Formulates and executes benchmarks/simulations inside an in-process, timeout-protected sandbox.
+  * **Writer**: Synthesizes multi-step research deliverables into structured executive summaries.
+* **Fail-Closed Quality Reviewer**: Grades specialist outputs; rejects deficient deliverables with corrective feedback.
+* **Circuit Breaker**: Halts execution and escalates to human intervention if a single subtask fails review more than twice.
+
+### 2. Dual-Layer Memory Systems (Phase 2)
+* **Short-Term Checkpointing**: Uses `SqliteSaver` to record state snapshots after each node, enabling deterministic execution recovery and pause-resume flows.
+* **Long-Term Semantic Distillation**: Extracts and embeds completed execution methodologies into ChromaDB.
+* **Retrieval-Augmented Planning**: Automatically injects relevant past strategies into the supervisor prompt before task decomposition.
+* **Lifecycle Management**: Implements access-count importance weighting, decay filters, consolidation, and user data purge endpoints.
+
+### 3. Human-in-the-Loop Governance (Phase 3)
+* **Policy-Based Triggers**: Escalates automatically on low plan confidence, destructive operations, review quality failures, or repeated errors.
+* **Approval Tiers**: Supports `NOTIFY`, `APPROVE_PLAN`, `APPROVE_ACTION`, and `TAKE_OVER`.
+* **State Resumption**: Merges human overrides or approvals back into checkpointed graphs.
+
+### 4. Observability & Debugging (Phase 4)
+* **Trace Hierarchy**: Emits OpenTelemetry spans capturing agent decisions, tool execution times, and latencies.
+* **Token & USD Cost Attribution**: Computes exact Bedrock inference costs across Claude 3.5 Haiku ($0.0008 / $0.004 per 1k) and Sonnet ($0.003 / $0.015 per 1k).
+* **Replay Debugger**: Inspects step-by-step state histories and executes divergent branches with mutated inputs.
+
+### 5. Automated Evaluation & CLI (Phase 5)
+* **LLM-as-a-Judge**: Evaluates runs against plan quality, tool accuracy, and groundedness.
+* **Fault Tolerance**: Verified against sandbox timeouts, unhandled tool exceptions, and consecutive review failures.
+* **Unified CLI**: CLI interface for running jobs, managing checkpointer databases, and serving the Streamlit UI.
+
+---
+
+## 🛠️ Installation & Setup
 
 ### Prerequisites
+* Python 3.11+
+* AWS Account with Amazon Bedrock model access (Claude 3.5 Sonnet & Claude 3.5 Haiku)
 
-* Python 3.11+ (Python 3.12 recommended)
-* `uv` package manager
-* AWS Account with Bedrock model access enabled for Claude models in `us-west-2`
-
-### Installation
-
-1. **Clone the repository:**
+### 1. Clone & Configure
 ```bash
-git clone https://github.com/YOUR_GITHUB_USERNAME/agent-orchestration-system.git
+git clone [https://github.com/h425h/agent-orchestration-system.git](https://github.com/h425h/agent-orchestration-system.git)
 cd agent-orchestration-system
 
-```
-
-
-2. **Set up the virtual environment:**
-```bash
-uv venv venv --python 3.12
+# Create and activate virtual environment
+python3 -m venv venv
 source venv/bin/activate
 
-```
-
-
-3. **Install dependencies:**
-```bash
-uv pip install boto3 python-dotenv langgraph langchain-core pydantic ddgs
-
-```
-
-
-4. **Configure Environment Variables:**
-```bash
-cp .env.example .env
-
-```
-
-
-Open `.env` and configure your AWS credentials:
-```env
-AWS_REGION=us-west-2
-AWS_BEARER_TOKEN_BEDROCK="your_actual_bedrock_api_token"
-
-```
-
-
-
----
-
-## Verification & Execution
-
-* **Verify Bedrock Connectivity:**
-```bash
-python test_bedrock.py
-
-```
-
-
-* **Verify Tool Registry & Access Controls:**
-```bash
-python test_tools.py
-
-```
-
-
-* **Verify Specialist Synthesis & Review Gate:**
-```bash
-python test_specialists.py
-
-```
-
-
-* **Run Supervisor Task Decomposition:**
-```bash
-python main.py
-
-```
-
-
-
----
-
-## Architecture & Core Features (Phase 1 Complete)
-
-### 1. Hierarchical Multi-Agent Graph
-- **Supervisor (`supervisor_planner`)**: Decomposes complex user requests into structured, dependency-aware subtasks.
-- **Dispatcher (`dispatcher_node`)**: Inspects task prerequisite IDs against completed subtasks and dynamically routes tasks.
-- **Specialists**:
-  - **Researcher (`researcher_node`)**: Queries DuckDuckGo and synthesizes external knowledge (powered by Claude Haiku).
-  - **Coder (`coder_node`)**: Generates and runs Python simulation/benchmark code (powered by Claude Sonnet).
-  - **Writer (`writer_node`)**: Synthesizes previous deliverables into a structured executive report.
-- **Reviewer (`reviewer_node`)**: Acts as a strict quality gate, grading outputs and returning structured JSON verdicts (`approved`, `rejected`, `escalate`).
-
-### 2. Autonomous Self-Correction & Circuit Breaker
-- **Feedback-Injected Retries**: Rejection feedback from the reviewer is dynamically prepended to the specialist prompt on subsequent attempts.
-- **Per-Subtask Retry Quota**: The dispatcher resets retry error counts per subtask. If a single task fails review more than twice, execution terminates via the `human_escalation` node to prevent infinite loops and token waste.
-
-### 3. Tool Sandboxing & Execution Security
-- **Role-Based Tool Registry**: Enforces per-node permissions (e.g., only `coder` may execute Python; only `researcher` may access search).
-- **Timeout-Safeguarded Sandbox**: Executes generated code with an allowlist of safe built-ins and standard modules (`math`, `time`, `random`, `json`, `tracemalloc`). Uses native Unix `signal.alarm` timeouts to eliminate macOS multiprocessing serialization issues while guarding against CPU-locking loops.
-
----
-
-## Roadmap
-
-- [x] **Phase 1: Core Orchestration Graph & Specialists**
-  - [x] StateGraph state machine with dynamic routing and reducer state
-  - [x] Role-based tool registry with sandboxed execution
-  - [x] Corrective retry loop with human escalation gate
-  - [x] Multi-model routing (Claude Haiku + Claude Sonnet on AWS Bedrock)
-- [ ] **Phase 2: Checkpointing & State Persistence**
-  - [ ] LangGraph Checkpointer integration (`SqliteSaver` / `MemorySaver`)
-  - [ ] Session resumption via `thread_id` and time-travel debugging
-  - [ ] Human-in-the-loop pause and resume on review escalation
-- [ ] **Phase 3: Long-Term Memory & Storage**
-- [ ] **Phase 4: Tool Expansion & Production Hardening**
+# Install dependencies via uv or pip
+pip install -r requirements.txt
