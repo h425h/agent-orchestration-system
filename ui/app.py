@@ -148,7 +148,7 @@ if ticket.level in [ApprovalLevel.APPROVE_ACTION, ApprovalLevel.TAKE_OVER]:
 action_col1, action_col2, action_col3, action_col4 = st.columns(4)
 
 with action_col1:
-    if st.button("✅ Approve Action / Plan", use_container_width=True):
+    if st.button("✅ Approve Action / Plan", width="stretch"):
         resume_with_human_decision(
             app=app,
             config={"configurable": {"thread_id": ticket.thread_id}},
@@ -160,7 +160,7 @@ with action_col1:
         st.rerun()
 
 with action_col2:
-    if st.button("✏️ Apply Modifications", use_container_width=True):
+    if st.button("✏️ Apply Modifications", width="stretch"):
         resume_with_human_decision(
             app=app,
             config={"configurable": {"thread_id": ticket.thread_id}},
@@ -173,7 +173,7 @@ with action_col2:
         st.rerun()
 
 with action_col3:
-    if st.button("❌ Reject & Force Retry", use_container_width=True):
+    if st.button("❌ Reject & Force Retry", width="stretch"):
         resume_with_human_decision(
             app=app,
             config={"configurable": {"thread_id": ticket.thread_id}},
@@ -185,7 +185,7 @@ with action_col3:
         st.rerun()
 
 with action_col4:
-    if st.button("👤 Manual Take Over", use_container_width=True):
+    if st.button("👤 Manual Take Over", width="stretch"):
         resume_with_human_decision(
             app=app,
             config={"configurable": {"thread_id": ticket.thread_id}},

@@ -283,6 +283,44 @@ class SemanticMemoryStore:
 
         return count
 
+    def store_memory(
+        self,
+        task: str,
+        approach: str,
+        tools_used: Optional[List[str]] = None,
+        findings: Optional[str] = None,
+        tags: Optional[List[str]] = None,
+        user_id: str = "default_user"
+    ) -> str:
+        """
+        Directly persists an arbitrary domain learning or benchmark memory into ChromaDB.
+        """
+        tools = tools_used or []
+        doc_text = (
+            f"Task: {task}\n"
+            f"Approach: {approach}\n"
+            f"Facts: {findings or 'N/A'}"
+        )
+        memory_id = f"mem_{uuid.uuid4().hex[:8]}"
+        now_ts = float(time.time())
+
+        self.collection.add(
+            ids=[memory_id],
+            documents=[doc_text],
+            metadatas=[{
+                "memory_id": memory_id,
+                "user_id": user_id,
+                "task": task[:200],
+                "summary": findings[:200] if findings else approach[:200],
+                "tools_used": ",".join(tools),
+                "access_count": 1,
+                "importance_score": 2.0,
+                "created_at": now_ts,
+                "last_accessed_at": now_ts,
+            }],
+        )
+        return memory_id
+
 
 # Singleton memory instance
 semantic_memory = SemanticMemoryStore()
