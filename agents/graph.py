@@ -29,7 +29,7 @@ def plan_gate_node(state: AgentState, config: RunnableConfig = None) -> dict:
     if escalation:
         if escalation.level == ApprovalLevel.NOTIFY:
             # Informational only: record notification without pausing
-            return {"pending_escalation": escalation.model_dump()}
+            return {"pending_escalation": escalation.model_dump(mode="json")}
 
         # Package full context and register review ticket
         ticket = approval_queue.enqueue(
@@ -45,7 +45,7 @@ def plan_gate_node(state: AgentState, config: RunnableConfig = None) -> dict:
             }
         )
         return {
-            "pending_escalation": escalation.model_dump(),
+            "pending_escalation": escalation.model_dump(mode="json"),
             "human_approved": False,
             "reviewer_feedback": f"Review Ticket Created: {ticket.ticket_id}"
         }
@@ -100,7 +100,7 @@ def human_review_gate_node(state: AgentState, config: RunnableConfig = None) -> 
     escalation = EscalationPolicy.check_execution_escalation(state)
     if escalation:
         if escalation.level == ApprovalLevel.NOTIFY:
-            return {"pending_escalation": escalation.model_dump()}
+            return {"pending_escalation": escalation.model_dump(mode="json")}
 
         # Package snapshot: task, plan, completed subtasks, active step, proposed deliverable
         ticket = approval_queue.enqueue(
@@ -119,7 +119,7 @@ def human_review_gate_node(state: AgentState, config: RunnableConfig = None) -> 
             }
         )
         return {
-            "pending_escalation": escalation.model_dump(),
+            "pending_escalation": escalation.model_dump(mode="json"),
             "human_approved": False,
             "reviewer_feedback": f"Execution Escalated: {ticket.ticket_id}"
         }

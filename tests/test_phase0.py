@@ -407,3 +407,38 @@ def test_halt_reason_is_printed(monkeypatch, tmp_path, capsys):
     main.run_orchestration_pipeline("Summarise topic X", thread_id="halt-1", db_path=str(tmp_path / "s.db"))
     out = capsys.readouterr().out
     assert "Halted for human review: low_quality_score" in out
+
+
+# ----------------------------------------------------------------- retry feedback reaches the search query
+def test_researcher_retry_query_includes_reviewer_feedback(monkeypatch):
+    spec = SpecialistLLM()
+    monkeypatch.setattr(specialists_mod, "llm", spec)
+    monkeypatch.setattr(specialists_mod.registry, "execute", lambda *a, **k: {"output": "x", "duration": 0.0})
+    state = {
+        "plan": {"subtasks": [{"id": "t1", "description": "Research frameworks", "specialist": "researcher"}]},
+        "current_subtask_id": "t1", "completed_subtasks": [],
+        "reviewer_verdict": "rejected", "reviewer_feedback": "missing AutoGen and CrewAI",
+    }
+    specialists_mod.researcher_node(state)
+    query_prompt = spec.prompts[0]
+    assert "missing AutoGen and CrewAI" in query_prompt and "NEW query" in query_prompt
+
+
+def test_first_attempt_query_has_no_retry_text(monkeypatch):
+    spec = SpecialistLLM()
+    monkeypatch.setattr(specialists_mod, "llm", spec)
+    monkeypatch.setattr(specialists_mod.registry, "execute", lambda *a, **k: {"output": "x", "duration": 0.0})
+    state = {
+        "plan": {"subtasks": [{"id": "t1", "description": "Research frameworks", "specialist": "researcher"}]},
+        "current_subtask_id": "t1", "completed_subtasks": [],
+    }
+    specialists_mod.researcher_node(state)
+    assert "NEW query" not in spec.prompts[0] and "REJECTED" not in spec.prompts[0]
+
+
+# ----------------------------------------------------------------- checkpoint holds plain strings, not Enums
+def test_pending_escalation_is_checkpointed_as_plain_strings(run_graph):
+    state, _, _ = run_graph(plan_json(TWO_STEP_PLAN, confidence=0.4), [])
+    esc = state["pending_escalation"]
+    assert type(esc["level"]) is str and type(esc["reason"]) is str
+    assert esc["level"] == "approve_plan" and esc["reason"] == "low_plan_confidence"

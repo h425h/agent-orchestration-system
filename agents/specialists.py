@@ -44,10 +44,17 @@ def researcher_node(state: AgentState) -> dict:
     subtask = get_current_subtask(state)
     prior_context = format_completed_context(state)
 
+    retry_feedback = rejection_feedback(state)
+    retry_note = (
+        "Write a NEW query that targets the information the reviewer says is missing; "
+        "do not repeat the earlier query.\n"
+    ) if retry_feedback else ""
+
     query_prompt = f"""Formulate a single, concise web search query to gather the required data.
 Subtask: {subtask.get('description', '')}
 Context: {prior_context}
 
+{retry_feedback}{retry_note}
 Return ONLY the plain query string."""
 
     search_query = llm.invoke([{"role": "user", "content": query_prompt}], max_tokens=60).strip()
