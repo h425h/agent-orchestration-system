@@ -42,8 +42,9 @@ def test_circuit_breaker_escalation():
         "reviewer_verdict": "rejected",
         "error_count": 2,
     }
-    assert route_after_review(state_escalate) == "human_escalation"
-    print("  [Pass] Repeated rejection (error_count >= 2) triggers human escalation.")
+    # The gate creates the TAKE_OVER ticket, then routes to the human_escalation halt.
+    assert route_after_review(state_escalate) == "human_review_gate"
+    print("  [Pass] Repeated rejection (error_count >= 2) routes to the human review gate.")
 
 
 if __name__ == "__main__":

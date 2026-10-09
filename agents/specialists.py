@@ -26,6 +26,17 @@ def format_completed_context(state: AgentState) -> str:
     return "\n\n".join(formatted)
 
 
+def rejection_feedback(state: AgentState) -> str:
+    """Reviewer feedback to include when retrying a rejected attempt (empty otherwise)."""
+    if state.get("reviewer_verdict") == "rejected" and state.get("reviewer_feedback"):
+        return (
+            "\nPREVIOUS ATTEMPT REJECTED BY REVIEWER:\n"
+            f"Feedback: {state['reviewer_feedback']}\n"
+            "Address this issue directly.\n"
+        )
+    return ""
+
+
 # ---------------------------------------------------------
 # 1. Researcher Specialist Node
 # ---------------------------------------------------------
@@ -47,7 +58,7 @@ Return ONLY the plain query string."""
 Subtask: {subtask.get('description', '')}
 Results:
 {raw_search_data}
-
+{rejection_feedback(state)}
 Provide a concise, fact-dense bulleted summary."""
 
     result = llm.invoke([{"role": "user", "content": synthesis_prompt}], max_tokens=1000)
@@ -61,7 +72,7 @@ Provide a concise, fact-dense bulleted summary."""
 
     return {
         "current_specialist_output": result,
-        "completed_subtasks": [completed_task],
+        "candidate_subtask": completed_task,
     }
 
 
@@ -71,15 +82,7 @@ Provide a concise, fact-dense bulleted summary."""
 def coder_node(state: AgentState) -> dict:
     subtask = get_current_subtask(state)
     prior_context = format_completed_context(state)
-    feedback = state.get("reviewer_feedback")
-
-    feedback_prompt = ""
-    if feedback and state.get("reviewer_verdict") == "rejected":
-        feedback_prompt = f"""
-PREVIOUS ATTEMPT REJECTED:
-Feedback: {feedback}
-Fix the exact issue noted above.
-"""
+    feedback_prompt = rejection_feedback(state)
 
     coder_prompt = f"""You are a Python benchmarking specialist.
 Write a compact, lightweight Python script to fulfill this subtask.
@@ -122,7 +125,7 @@ CRITICAL BENCHMARK CONSTRAINTS:
 
     return {
         "current_specialist_output": summary,
-        "completed_subtasks": [completed_task],
+        "candidate_subtask": completed_task,
     }
 
 
@@ -138,7 +141,7 @@ Overall Goal: {state.get('task')}
 Subtask: {subtask.get('description', '')}
 Context:
 {prior_context}
-
+{rejection_feedback(state)}
 Structure with clear bullet points, comparison tables, and key takeaways."""
 
     result = llm.invoke([{"role": "user", "content": writer_prompt}], max_tokens=1500)
@@ -150,8 +153,8 @@ Structure with clear bullet points, comparison tables, and key takeaways."""
         "result": result,
     }
 
+    # final_output is set by the commit node once the reviewer approves this result.
     return {
         "current_specialist_output": result,
-        "completed_subtasks": [completed_task],
-        "final_output": result,
+        "candidate_subtask": completed_task,
     }

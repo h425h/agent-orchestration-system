@@ -27,11 +27,10 @@ from memory.checkpointer import get_sqlite_checkpointer
 
 st.set_page_config(
     page_title="Multi-Agent HITL Orchestrator",
-    page_icon="🛡️",
     layout="wide"
 )
 
-st.title("🛡️ Multi-Agent HITL Control Center")
+st.title("Multi-Agent HITL Control Center")
 st.caption("Inspect paused executions, review agent decisions, and issue granular approvals.")
 
 # Initialize graph instance with checkpointer
@@ -41,10 +40,10 @@ app = create_agent_graph(checkpointer=checkpointer)
 # ---------------------------------------------------------
 # Sidebar: Ticket Queue & Refresh
 # ---------------------------------------------------------
-st.sidebar.header("📥 Approval Queue")
+st.sidebar.header("Approval Queue")
 
 # Seed mock tickets if queue is empty for UI testing
-if st.sidebar.button("➕ Seed Test Escalations"):
+if st.sidebar.button("Seed Test Escalations"):
     approval_queue.enqueue(
         thread_id="test_session_101",
         level=ApprovalLevel.APPROVE_PLAN,
@@ -81,7 +80,7 @@ pending_tickets = approval_queue.get_pending_tickets()
 
 if not pending_tickets:
     st.sidebar.info("No tickets currently pending review.")
-    st.info("✅ No active agent escalations. Autonomous pipeline running normally.")
+    st.info("No active agent escalations. Autonomous pipeline running normally.")
     st.stop()
 
 ticket_options = {f"[{t.ticket_id}] {t.level.value.upper()} - {t.reason.value}": t.ticket_id for t in pending_tickets}
@@ -95,7 +94,7 @@ ticket = approval_queue.get_ticket(selected_ticket_id)
 col1, col2 = st.columns([1, 1])
 
 with col1:
-    st.subheader("📋 Execution Context")
+    st.subheader("Execution Context")
     st.markdown(f"**Ticket ID:** `{ticket.ticket_id}`")
     st.markdown(f"**Thread ID:** `{ticket.thread_id}`")
     st.markdown(f"**Approval Level:** `{ticket.level.value}`")
@@ -110,7 +109,7 @@ with col1:
         st.json(ticket.context["plan"])
 
 with col2:
-    st.subheader("🤖 Proposed Specialist Action & Review")
+    st.subheader("Proposed Specialist Action & Review")
 
     if "subtask_id" in ticket.context:
         st.markdown(f"**Active Subtask:** `{ticket.context['subtask_id']}`")
@@ -130,7 +129,7 @@ with col2:
 # Human Resolution Center
 # ---------------------------------------------------------
 st.markdown("---")
-st.subheader("🛠️ Human Resolution Center")
+st.subheader("Human Resolution Center")
 
 feedback = st.text_area(
     "Operator Critique / Feedback (sent to agent if modifying or rejecting):",
@@ -148,7 +147,7 @@ if ticket.level in [ApprovalLevel.APPROVE_ACTION, ApprovalLevel.TAKE_OVER]:
 action_col1, action_col2, action_col3, action_col4 = st.columns(4)
 
 with action_col1:
-    if st.button("✅ Approve Action / Plan", width="stretch"):
+    if st.button("Approve Action / Plan", width="stretch"):
         resume_with_human_decision(
             app=app,
             config={"configurable": {"thread_id": ticket.thread_id}},
@@ -160,7 +159,7 @@ with action_col1:
         st.rerun()
 
 with action_col2:
-    if st.button("✏️ Apply Modifications", width="stretch"):
+    if st.button("Apply Modifications", width="stretch"):
         resume_with_human_decision(
             app=app,
             config={"configurable": {"thread_id": ticket.thread_id}},
@@ -173,7 +172,7 @@ with action_col2:
         st.rerun()
 
 with action_col3:
-    if st.button("❌ Reject & Force Retry", width="stretch"):
+    if st.button("Reject & Force Retry", width="stretch"):
         resume_with_human_decision(
             app=app,
             config={"configurable": {"thread_id": ticket.thread_id}},
@@ -185,7 +184,7 @@ with action_col3:
         st.rerun()
 
 with action_col4:
-    if st.button("👤 Manual Take Over", width="stretch"):
+    if st.button("Manual Take Over", width="stretch"):
         resume_with_human_decision(
             app=app,
             config={"configurable": {"thread_id": ticket.thread_id}},

@@ -32,7 +32,7 @@ def main():
         run_orchestration_pipeline(args.task, thread_id=args.thread_id)
 
     elif args.command == "ui":
-        print("🚀 Starting Streamlit Observability & HITL Dashboard...")
+        print("Starting Streamlit Observability & HITL Dashboard...")
         subprocess.run([sys.executable, "-m", "streamlit", "run", "ui/app.py"])
 
     elif args.command == "history":

@@ -8,13 +8,13 @@ from eval.replay import replay_debugger
 
 
 def render_trace_explorer():
-    st.title("🔍 Observability, Cost & Replay Debugger")
+    st.title("Observability, Cost & Replay Debugger")
     st.caption("Inspect trace spans, model token costs, and branch historical checkpoints.")
 
     tab_traces, tab_cost, tab_replay = st.tabs([
-        "🌲 Trace Explorer",
-        "💰 Cost & Token Attribution",
-        "⏪ Replay & Branch Debugger"
+        "Trace Explorer",
+        "Cost & Token Attribution",
+        "Replay & Branch Debugger"
     ])
 
     # -------------------------------------------------------------
@@ -24,7 +24,7 @@ def render_trace_explorer():
         # Trace generation helper
         with st.sidebar:
             st.subheader("Trace Controls")
-            if st.button("➕ Generate Sample Trace & Usage"):
+            if st.button("Generate Sample Trace & Usage"):
                 sample_id = f"trace_{int(time.time())}"
                 # 1. Supervisor
                 s1 = tracer.start_span(sample_id, "supervisor_planning", agent_role="supervisor", attributes={"task": "Benchmark vector search 2026"})
@@ -71,8 +71,7 @@ def render_trace_explorer():
                 span_options = {}
                 for s in spans:
                     indent = "    " if s.get("parent_span_id") else ""
-                    prefix = "🛠️ " if "tool" in s["name"] else ("⚖️ " if "reviewer" in s["name"] else "🤖 ")
-                    span_options[s["span_id"]] = f"{indent}{prefix}{s['name']} ({s.get('latency_ms', 0)}ms)"
+                    span_options[s["span_id"]] = f"{indent}{s['name']} ({s.get('latency_ms', 0)}ms)"
 
                 selected_span_id = st.radio("Select Span", list(span_options.keys()), format_func=lambda x: span_options[x])
 
@@ -140,11 +139,11 @@ def render_trace_explorer():
             })
 
             st.divider()
-            st.subheader("🔀 Branch Execution from This Step")
+            st.subheader("Branch Execution from This Step")
             mutation_key = st.text_input("State Key to Override", value="reviewer_feedback")
             mutation_val = st.text_area("Override Value", value="Fix performance metrics table format.")
 
-            if st.button("🚀 Replay Branch with Mutation"):
+            if st.button("Replay Branch with Mutation"):
                 new_branch_id = f"branch_{uuid.uuid4().hex[:6]}"
                 result = replay_debugger.replay_and_branch(
                     base_thread_id=st.session_state.get("active_replay_thread"),

@@ -1,4 +1,5 @@
 # agents/escalation.py
+import re
 from enum import Enum
 from typing import Optional, Dict, Any, List
 from pydantic import BaseModel, Field
@@ -65,16 +66,26 @@ class EscalationPolicy:
                 context={"confidence": confidence, "plan": plan}
             )
 
-        # #3. Check for sensitive domain terms in task or plan subtasks
+        # #3. Check for sensitive domain terms (whole words, so "postgres" is not "post")
+        task_match = _SENSITIVE_RE.search(task_text)
+        if task_match:
+            return EscalationRequest(
+                level=ApprovalLevel.APPROVE_ACTION,
+                reason=EscalationReason.SENSITIVE_OPERATION,
+                description=f"Task text contains sensitive operation '{task_match.group(0)}' requiring confirmation.",
+                context={"matched": task_match.group(0), "task": state.get("task")}
+            )
+
         for subtask in plan.get("subtasks", []):
             desc = subtask.get("description", "").lower()
-            if any(keyword in desc or keyword in task_text for keyword in cls.SENSITIVE_KEYWORDS):
+            match = _SENSITIVE_RE.search(desc)
+            if match:
                 return EscalationRequest(
                     subtask_id=subtask.get("id"),
                     level=ApprovalLevel.APPROVE_ACTION,
                     reason=EscalationReason.SENSITIVE_OPERATION,
-                    description=f"Subtask '{subtask.get('id')}' contains a sensitive operation requiring confirmation.",
-                    context={"subtask": subtask}
+                    description=f"Subtask '{subtask.get('id')}' contains sensitive operation '{match.group(0)}' requiring confirmation.",
+                    context={"subtask": subtask, "matched": match.group(0)}
                 )
 
         return None
@@ -111,3 +122,12 @@ class EscalationPolicy:
             )
 
         return None
+
+
+# Whole-word match with simple inflections (delete/deleted/deleting, send/sends/sending).
+# Deliberately conservative: a false positive costs a human click, a miss costs a destructive action.
+_SENSITIVE_RE = re.compile(
+    r"\b(?:"
+    + "|".join(re.escape(k) for k in sorted(EscalationPolicy.SENSITIVE_KEYWORDS, key=len, reverse=True))
+    + r")(?:s|es|ed|d|ing)?\b"
+)
