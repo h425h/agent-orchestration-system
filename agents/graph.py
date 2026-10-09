@@ -1,5 +1,6 @@
 # agents/graph.py
 from typing import Optional
+from langchain_core.runnables import RunnableConfig
 from langgraph.graph import StateGraph, END
 from langgraph.checkpoint.base import BaseCheckpointSaver
 
@@ -11,11 +12,16 @@ from agents.escalation import EscalationPolicy, ApprovalLevel
 from agents.approval_queue import approval_queue
 
 
+def _thread_id(config: Optional[RunnableConfig]) -> str:
+    """Real LangGraph thread id, so review tickets map back to the run that raised them."""
+    return ((config or {}).get("configurable") or {}).get("thread_id", "unknown_thread")
+
+
 # ---------------------------------------------------------
 # 1. Management & Gate Nodes
 # ---------------------------------------------------------
 
-def plan_gate_node(state: AgentState) -> dict:
+def plan_gate_node(state: AgentState, config: RunnableConfig = None) -> dict:
     """
     #1. Evaluates supervisor plan against escalation policy before any subtask begins.
     """
@@ -27,7 +33,7 @@ def plan_gate_node(state: AgentState) -> dict:
 
         # Package full context and register review ticket
         ticket = approval_queue.enqueue(
-            thread_id="active_thread",
+            thread_id=_thread_id(config),
             level=escalation.level,
             reason=escalation.reason,
             description=escalation.description,
@@ -64,13 +70,30 @@ def dispatcher_node(state: AgentState) -> dict:
                     "current_subtask_id": task["id"],
                     "reviewer_verdict": None,
                     "reviewer_feedback": None,
+                    "reviewer_score": None,
+                    "candidate_subtask": None,
                     "error_count": 0,
                 }
 
     return {"current_subtask_id": None}
 
 
-def human_review_gate_node(state: AgentState) -> dict:
+def commit_node(state: AgentState) -> dict:
+    """
+    Records the specialist's result as completed only after it passed review (and any human gate).
+    Rejected attempts never reach completed_subtasks, so retries cannot create duplicates and
+    unreviewed output cannot feed downstream subtasks.
+    """
+    candidate = state.get("candidate_subtask")
+    if not candidate:
+        return {}
+    update = {"completed_subtasks": [candidate], "candidate_subtask": None}
+    if candidate.get("specialist") == "writer":
+        update["final_output"] = candidate.get("result")
+    return update
+
+
+def human_review_gate_node(state: AgentState, config: RunnableConfig = None) -> dict:
     """
     #3. Evaluates deliverable quality and retries to check if execution pause is needed.
     """
@@ -81,7 +104,7 @@ def human_review_gate_node(state: AgentState) -> dict:
 
         # Package snapshot: task, plan, completed subtasks, active step, proposed deliverable
         ticket = approval_queue.enqueue(
-            thread_id="active_thread",
+            thread_id=_thread_id(config),
             level=escalation.level,
             reason=escalation.reason,
             description=escalation.description,
@@ -150,33 +173,34 @@ def route_dispatcher(state: AgentState) -> str:
 def route_after_review(state: AgentState) -> str:
     """
     Directs flow based on reviewer verdict:
-    1. 'approved' ALWAYS moves forward to dispatcher.
-    2. 'rejected' checks error_count:
-       - if error_count >= 2 -> human_escalation
-       - if error_count < 2 -> retry_specialist
-    3. Any other verdict ('escalate', unparseable) -> human_escalation
+    1. 'approved' -> commit, unless the quality score is under the floor -> human_review_gate.
+    2. 'rejected' -> retry_specialist while error_count < 2; at the retry ceiling the
+       human_review_gate raises a TAKE_OVER ticket so a person can supply the result.
+    3. Any other verdict ('escalate', unparseable) -> human_escalation.
     """
     verdict = state.get("reviewer_verdict")
 
     if verdict == "approved":
-        return "dispatcher"
+        score = state.get("reviewer_score")
+        if score is not None and score < EscalationPolicy.QUALITY_SCORE_THRESHOLD:
+            return "human_review_gate"
+        return "commit"
 
     if verdict == "rejected":
-        errors = state.get("error_count", 0)
-        if errors >= 2:
-            return "human_escalation"
+        if state.get("error_count", 0) >= 2:
+            return "human_review_gate"
         return "retry_specialist"
 
     return "human_escalation"
 
 
 def route_after_human_gate(state: AgentState) -> str:
-    """Routes after human review gate evaluates state."""
+    """Routes after the human review gate: blocked until approved, otherwise commit."""
     escalation = state.get("pending_escalation")
     if escalation and escalation.get("level") in [ApprovalLevel.APPROVE_ACTION, ApprovalLevel.TAKE_OVER]:
         if not state.get("human_approved", False):
             return "human_escalation"
-    return "dispatcher"
+    return "commit"
 
 
 # ---------------------------------------------------------
@@ -194,6 +218,7 @@ def create_agent_graph(checkpointer: Optional[BaseCheckpointSaver] = None):
     workflow.add_node("coder", coder_node)
     workflow.add_node("writer", writer_node)
     workflow.add_node("reviewer", reviewer_node)
+    workflow.add_node("commit", commit_node)
     workflow.add_node("human_review_gate", human_review_gate_node)
     workflow.add_node("increment_error", update_error_counter)
     workflow.add_node("human_escalation", human_escalation_node)
@@ -234,7 +259,7 @@ def create_agent_graph(checkpointer: Optional[BaseCheckpointSaver] = None):
         "reviewer",
         route_after_review,
         {
-            "dispatcher": "dispatcher",
+            "commit": "commit",
             "retry_specialist": "increment_error",
             "human_review_gate": "human_review_gate",
             "human_escalation": "human_escalation",
@@ -246,10 +271,11 @@ def create_agent_graph(checkpointer: Optional[BaseCheckpointSaver] = None):
         "human_review_gate",
         route_after_human_gate,
         {
-            "dispatcher": "dispatcher",
+            "commit": "commit",
             "human_escalation": "human_escalation"
         }
     )
+    workflow.add_edge("commit", "dispatcher")
 
     # 7. Retry path increments error count and re-dispatches
     workflow.add_conditional_edges(

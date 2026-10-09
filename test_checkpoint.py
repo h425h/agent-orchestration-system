@@ -1,6 +1,6 @@
 # test_checkpoint.py
 import uuid
-from memory.checkpointer import get_checkpointer
+from memory.checkpointer import get_sqlite_checkpointer as get_checkpointer
 from agents.graph import create_agent_graph
 from agents.state import AgentState
 

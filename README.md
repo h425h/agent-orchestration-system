@@ -86,7 +86,7 @@ The system features dynamic task decomposition, specialized tool execution, fail
 
 ### 4. Observability & Debugging (Phase 4)
 * **Trace Hierarchy**: Emits OpenTelemetry spans capturing agent decisions, tool execution times, and latencies.
-* **Token & USD Cost Attribution**: Computes exact Bedrock inference costs across Claude 3.5 Haiku ($0.0008 / $0.004 per 1k) and Sonnet ($0.003 / $0.015 per 1k).
+* **Token & USD Cost Attribution**: Records the real token usage and latency from every Bedrock Converse response and attributes it to the graph node that incurred it. Prices come from a rate table in `eval/cost_tracker.py` (Haiku 4.5: $1/$5 per 1M tokens, Sonnet 4.6: $3/$15); models without a rate are flagged as unpriced rather than guessed.
 * **Replay Debugger**: Inspects step-by-step state histories and executes divergent branches with mutated inputs.
 
 ### 5. Automated Evaluation & CLI (Phase 5)
@@ -96,7 +96,7 @@ The system features dynamic task decomposition, specialized tool execution, fail
 
 ---
 
-## 🛠️ Installation & Setup
+## Installation & Setup
 
 ### Prerequisites
 * Python 3.11+

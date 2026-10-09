@@ -3,6 +3,7 @@ import time
 import uuid
 from agents.graph import create_agent_graph
 from agents.state import AgentState
+from agents.bedrock_llm import usage_collector
 from agents.approval_queue import approval_queue, ReviewDecision
 from agents.escalation import ApprovalLevel, EscalationReason
 from agents.resumption import resume_with_human_decision
@@ -14,7 +15,7 @@ from eval.cost_tracker import cost_tracker
 
 def run_portfolio_showcase():
     print("=" * 80)
-    print("🌟 MULTI-AGENT AUTONOMOUS ORCHESTRATION PLATFORM — SYSTEM DEMO")
+    print("MULTI-AGENT AUTONOMOUS ORCHESTRATION PLATFORM — SYSTEM DEMO")
     print("=" * 80)
 
     demo_thread = f"showcase_{uuid.uuid4().hex[:6]}"
@@ -34,7 +35,7 @@ def run_portfolio_showcase():
         tags=["benchmarks", "vector-db"]
     )
     time.sleep(0.3)
-    print("  ✔ Prior domain memory indexed into vector database.")
+    print("  Prior domain memory indexed into vector database.")
 
     # -------------------------------------------------------------
     # STAGE 2: Task Execution & Specialist Coordination
@@ -71,13 +72,10 @@ def run_portfolio_showcase():
             span = tracer.start_span(demo_thread, f"node_{node_name}", parent_span_id=root_span.span_id)
             tracer.end_span(span.span_id, status="success")
 
-            cost_tracker.record_usage(
+            cost_tracker.record_calls(
                 run_id=demo_thread,
                 agent_role=node_name,
-                model_id="anthropic.claude-3-5-haiku-20241022-v1:0",
-                input_tokens=650,
-                output_tokens=180,
-                latency_ms=120.0
+                calls=usage_collector.drain(),
             )
 
     # -------------------------------------------------------------
@@ -88,8 +86,8 @@ def run_portfolio_showcase():
 
     if pending:
         active_ticket = pending[-1]
-        print(f"  ✔ Live Escalation Caught: Ticket ID={active_ticket.ticket_id} (Status: {active_ticket.status})")
-        print(f"  ✔ Policy Level: {active_ticket.level.value} | Reason: {active_ticket.reason.value}")
+        print(f"  Live Escalation Caught: Ticket ID={active_ticket.ticket_id} (Status: {active_ticket.status})")
+        print(f"  Policy Level: {active_ticket.level.value} | Reason: {active_ticket.reason.value}")
         print("  → Simulating Operator Sign-off & Resumption...")
         resume_with_human_decision(
             app=app,
@@ -98,7 +96,7 @@ def run_portfolio_showcase():
             decision=ReviewDecision.APPROVED,
             feedback="Operator verified plan and approved execution."
         )
-        print("  ✔ Ticket resolved and operator approval merged into graph checkpoint.")
+        print("  Ticket resolved and operator approval merged into graph checkpoint.")
     else:
         # If execution ran autonomously, simulate a sensitive action escalation
         sim_ticket = approval_queue.enqueue(
@@ -108,7 +106,7 @@ def run_portfolio_showcase():
             description="Coder attempted to run index migration script.",
             context={"subtask_id": "task_deploy", "proposed_action": "apply_index_migrations()"}
         )
-        print(f"  ✔ Escalation Enqueued: Ticket ID={sim_ticket.ticket_id} (Level={sim_ticket.level.value})")
+        print(f"  Escalation Enqueued: Ticket ID={sim_ticket.ticket_id} (Level={sim_ticket.level.value})")
         resume_with_human_decision(
             app=app,
             config=config,
@@ -116,7 +114,7 @@ def run_portfolio_showcase():
             decision=ReviewDecision.APPROVED,
             feedback="Operator verified migration safety."
         )
-        print("  ✔ Ticket resolved to APPROVED.")
+        print("  Ticket resolved to APPROVED.")
 
     tracer.end_span(root_span.span_id, status="success")
 
@@ -133,7 +131,7 @@ def run_portfolio_showcase():
     print(f"  • Agent Roles Utilized:          {list(summary['by_agent'].keys())}")
 
     print("\n" + "=" * 80)
-    print("✅ SHOWCASE DEMO COMPLETED SUCCESSFULLY")
+    print("SHOWCASE DEMO COMPLETED SUCCESSFULLY")
     print("   To explore traces & checkpoints interactively, run: python cli.py ui")
     print("=" * 80)
 

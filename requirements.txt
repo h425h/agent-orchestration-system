@@ -1,0 +1,12 @@
+# Runtime (minimums are the versions this project was last tested against)
+langgraph>=1.2
+langgraph-checkpoint-sqlite>=3.1
+boto3>=1.43
+python-dotenv>=1.0
+pydantic>=2.13
+chromadb>=1.5
+ddgs>=9.0
+streamlit>=1.50
+
+# Tests
+pytest>=8.0

@@ -3,6 +3,8 @@ import json
 from agents.state import AgentState
 from agents.bedrock_llm import llm
 
+VALID_VERDICTS = {"approved", "rejected", "escalate"}
+
 REVIEWER_SYSTEM_PROMPT = """You are an exacting Quality Reviewer Agent.
 Evaluate whether a specialist's deliverable satisfies the assigned subtask.
 
@@ -60,6 +62,8 @@ Evaluate the deliverable strictly and concisely."""
 
     try:
         review_data = json.loads(cleaned)
+        if not isinstance(review_data, dict):
+            raise ValueError("review is not a JSON object")
     except Exception:
         review_data = {
             "verdict": "escalate",
@@ -67,7 +71,17 @@ Evaluate the deliverable strictly and concisely."""
             "feedback": "Reviewer output was unparseable; escalating for human check.",
         }
 
+    verdict = review_data.get("verdict", "escalate")
+    if verdict not in VALID_VERDICTS:
+        verdict = "escalate"  # fail closed on anything unexpected
+
+    try:
+        score = max(0.0, min(10.0, float(review_data.get("score", 0.0))))
+    except (TypeError, ValueError):
+        score = 0.0
+
     return {
-        "reviewer_verdict": review_data.get("verdict", "escalate"),
+        "reviewer_verdict": verdict,
         "reviewer_feedback": review_data.get("feedback", ""),
+        "reviewer_score": score,
     }
