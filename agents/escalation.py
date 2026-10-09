@@ -38,6 +38,8 @@ class EscalationPolicy:
         "email", "post", "publish", "send", "credential", "api_key", "secret"
     }
 
+    NON_ACTING_SPECIALISTS = {"researcher", "writer"}
+
     CONFIDENCE_THRESHOLD = 0.70
     QUALITY_SCORE_THRESHOLD = 6.0
 
@@ -66,19 +68,25 @@ class EscalationPolicy:
                 context={"confidence": confidence, "plan": plan}
             )
 
-        # #3. Check for sensitive domain terms (whole words, so "postgres" is not "post")
-        task_match = _SENSITIVE_RE.search(task_text)
-        if task_match:
-            return EscalationRequest(
-                level=ApprovalLevel.APPROVE_ACTION,
-                reason=EscalationReason.SENSITIVE_OPERATION,
-                description=f"Task text contains sensitive operation '{task_match.group(0)}' requiring confirmation.",
-                context={"matched": task_match.group(0), "task": state.get("task")}
-            )
+        # #3. Sensitive-operation keywords. Only specialists that can act on the world are
+        # screened: the researcher only reads and the writer only produces text, so words like
+        # "publish-subscribe" or "published reports" in their descriptions are harmless.
+        # Unknown or missing specialists are screened (fail safe).
+        subtasks = plan.get("subtasks", [])
+        screened = [st for st in subtasks if st.get("specialist") not in cls.NON_ACTING_SPECIALISTS]
 
-        for subtask in plan.get("subtasks", []):
-            desc = subtask.get("description", "").lower()
-            match = _SENSITIVE_RE.search(desc)
+        if screened or not subtasks:
+            task_match = _SENSITIVE_RE.search(task_text)
+            if task_match:
+                return EscalationRequest(
+                    level=ApprovalLevel.APPROVE_ACTION,
+                    reason=EscalationReason.SENSITIVE_OPERATION,
+                    description=f"Task text contains sensitive operation '{task_match.group(0)}' requiring confirmation.",
+                    context={"matched": task_match.group(0), "task": state.get("task")}
+                )
+
+        for subtask in screened:
+            match = _SENSITIVE_RE.search(subtask.get("description", "").lower())
             if match:
                 return EscalationRequest(
                     subtask_id=subtask.get("id"),

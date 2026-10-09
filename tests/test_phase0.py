@@ -367,3 +367,43 @@ def test_pipeline_skips_distillation_for_escalated_runs(monkeypatch, tmp_path):
 
     assert result["status"] == "escalated"
     assert called == [], "failed or escalated runs must not be stored as successful strategies"
+
+
+# ----------------------------------------------------------------- keyword gate scope
+def _typed_state(task, subtasks):
+    return {"task": task, "plan": {"confidence": 0.95, "subtasks": subtasks}}
+
+
+def _st2(i, specialist, desc):
+    return {"id": i, "specialist": specialist, "description": desc}
+
+
+def test_researcher_and_writer_wording_is_not_screened():
+    state = _typed_state("Research agent frameworks", [
+        _st2("t1", "researcher", "Cover publish-subscribe patterns and published analyst reports"),
+        _st2("t2", "writer", "Write blog posts style summary"),
+    ])
+    assert EscalationPolicy.check_plan_escalation(state) is None
+
+
+def test_coder_subtask_is_still_screened_in_mixed_plan():
+    state = _typed_state("Research then clean up", [
+        _st2("t1", "researcher", "Look up published docs"),
+        _st2("t2", "coder", "Drop table staging_users"),
+    ])
+    esc = EscalationPolicy.check_plan_escalation(state)
+    assert esc is not None and esc.subtask_id == "t2"
+
+
+def test_unknown_specialist_is_screened():
+    state = _typed_state("x", [{"id": "t1", "description": "delete old records"}])
+    assert EscalationPolicy.check_plan_escalation(state) is not None
+
+
+def test_halt_reason_is_printed(monkeypatch, tmp_path, capsys):
+    import main
+    install_fakes(monkeypatch, plan_json(TWO_STEP_PLAN), [review("approved", 4.0)])
+    monkeypatch.setattr(main.semantic_memory, "distill_and_store", lambda *a, **k: {})
+    main.run_orchestration_pipeline("Summarise topic X", thread_id="halt-1", db_path=str(tmp_path / "s.db"))
+    out = capsys.readouterr().out
+    assert "Halted for human review: low_quality_score" in out

@@ -106,6 +106,12 @@ def run_orchestration_pipeline(task_prompt: str, thread_id: str = None, db_path:
     status = classify_run(final_state)
 
     elapsed = round(time.time() - start_time, 2)
+
+    if status == "escalated":
+        esc = final_state.get("pending_escalation") or {}
+        reason = getattr(esc.get("reason"), "value", esc.get("reason")) or "reviewer_escalation"
+        print(f"\nHalted for human review: {reason}")
+        print(f"  {esc.get('description') or final_state.get('reviewer_feedback')}")
     tracer.end_span(root_span.span_id, status="success", attributes={"elapsed_s": elapsed, "run_status": status})
 
     insights = {}
